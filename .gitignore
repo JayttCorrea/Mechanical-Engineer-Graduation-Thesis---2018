@@ -1,0 +1,6 @@
+build/
+*.tccs
+*.png
+
+build*/
+dist/
