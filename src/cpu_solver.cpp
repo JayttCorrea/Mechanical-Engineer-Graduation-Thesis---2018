@@ -174,6 +174,11 @@ void CpuSolver::reset() {
     repaired_ = 0;
 }
 
+void CpuSolver::set_velocity_limit(float limit) {
+    guard_u_.set_limit(limit);
+    guard_v_.set_limit(limit);
+}
+
 const Fields& CpuSolver::fields() {
     // The host arrays are the simulation state, so repairing them in place also lets the
     // run continue from valid numbers.

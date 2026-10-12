@@ -6,6 +6,7 @@
 
 #include "tcc/cpu_solver.hpp"
 #include "tcc/gpu_solver.hpp"
+#include "tcc/stabilizer.hpp"
 #include "test_framework.hpp"
 
 using namespace tcc;
@@ -199,6 +200,69 @@ TEST(gpu_survives_a_real_blow_up_without_returning_nan) {
 
     gpu.reset();
     CHECK(gpu.repaired_values() == 0);
+}
+
+TEST(gpu_follows_time_step_and_scheme_changes_made_while_running) {
+    require_device();
+    Config c = Config::cavity();
+    c.nx = c.ny = 24;
+    c.advection = Advection::Backward;
+    CpuSolver cpu(c);
+    GpuSolver gpu(c);
+    for (int i = 0; i < 20; ++i) { cpu.step(); gpu.step(); }
+    for (Solver* s : {static_cast<Solver*>(&cpu), static_cast<Solver*>(&gpu)}) {
+        s->set_time_step(c.dt / 2.0f);
+        s->set_advection(Advection::Upwind);
+    }
+    for (int i = 0; i < 40; ++i) { cpu.step(); gpu.step(); }
+    const double scale = std::max(max_abs(cpu.fields().u), max_abs(cpu.fields().v));
+    CHECK(scaled_difference(gpu.fields().u, cpu.fields().u, scale) < 1e-5);
+    CHECK(scaled_difference(gpu.fields().v, cpu.fields().v, scale) < 1e-5);
+}
+
+TEST(gpu_velocity_limit_repairs_huge_but_finite_values) {
+    require_device();
+    Config c = Config::cavity();
+    c.nx = c.ny = 16;
+    GpuSolver gpu(c);
+    gpu.set_velocity_limit(10.0f * c.u0);
+    std::vector<float> u(c.cells(), 0.0f), v(c.cells(), 0.0f);
+    u[40] = 5.0f;  // finite, but 500x the lid speed
+    gpu.set_velocity(u, v);
+    CHECK(gpu.fields().u[40] == 0.0f);
+    CHECK(gpu.repaired_values() == 1);
+}
+
+TEST(gpu_stabilizer_keeps_a_diverging_cavity_running) {
+    require_device();
+    Config c = Config::cavity();
+    c.nx = c.ny = 40;
+    c.advection = Advection::Backward;
+    c.pressure_iterations = 20;
+    GpuSolver gpu(c);
+    gpu.set_velocity_limit(10.0f * c.u0);
+    Stabilizer stabilizer(c.dt, c.advection);
+
+    auto run_frames = [&](int frames) {
+        for (int f = 0; f < frames; ++f) {
+            for (int i = 0; i < 25; ++i) gpu.step();
+            const Fields& fields = gpu.fields();
+            REQUIRE(all_finite(fields.u) && all_finite(fields.v) && all_finite(fields.p));
+            if (stabilizer.update(gpu.repaired_values(), gpu.steps())) {
+                gpu.set_time_step(stabilizer.dt());
+                gpu.set_advection(stabilizer.advection());
+            }
+        }
+    };
+    run_frames(200);  // 5000 steps: instability, repairs, stabiliser reacts
+    CHECK(gpu.repaired_values() > 0);
+    CHECK(stabilizer.advection() == Advection::Upwind);
+
+    const std::uint64_t repaired_before = gpu.repaired_values();
+    const std::vector<float> before = gpu.fields().u;
+    run_frames(120);  // 3000 more steps: quiet and still evolving
+    CHECK(gpu.repaired_values() == repaired_before);
+    CHECK(gpu.fields().u != before);
 }
 
 TEST(gpu_rejects_invalid_configuration_and_bad_device_index) {

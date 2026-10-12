@@ -8,7 +8,8 @@ set(TCC_UNIT_TESTS
     test_cpu_solver.cpp
     test_legacy_equivalence.cpp
     test_setup.cpp
-    test_field_guard.cpp)
+    test_field_guard.cpp
+    test_stabilizer.cpp)
 
 add_executable(tcc_unit_tests ${TCC_UNIT_TESTS})
 target_link_libraries(tcc_unit_tests PRIVATE tcc_fluid)

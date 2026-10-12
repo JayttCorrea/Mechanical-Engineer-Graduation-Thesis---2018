@@ -1,6 +1,7 @@
 // Headless run: advance the simulation N steps, print statistics and write
 // PNG images of u, v and p (and optionally the state file the viewer can load).
 
+#include <algorithm>
 #include <chrono>
 #include <cmath>
 #include <cstdio>
@@ -13,6 +14,7 @@
 #include "tcc/colormap.hpp"
 #include "tcc/png_writer.hpp"
 #include "tcc/solver_factory.hpp"
+#include "tcc/stabilizer.hpp"
 #include "tcc/state_io.hpp"
 
 namespace {
@@ -66,7 +68,7 @@ int main(int argc, char** argv) {
     cli::Args args(argc, argv);
     if (args.has("help")) { usage(); return 0; }
     std::vector<std::string> known = cli::config_options();
-    for (const char* k : {"backend", "steps", "out", "scale", "save", "load", "help"}) known.emplace_back(k);
+    for (const char* k : {"backend", "steps", "out", "scale", "save", "load", "stabilize", "help"}) known.emplace_back(k);
     args.allow_only(known);
 
     try {
@@ -92,11 +94,23 @@ int main(int argc, char** argv) {
         }
 
         const auto t0 = std::chrono::steady_clock::now();
+        const bool stabilize = args.has("stabilize");
+        tcc::Stabilizer stabilizer(cfg.dt, cfg.advection);
+        if (stabilize) {
+            const float speed = std::max(std::fabs(cfg.u0), std::fabs(cfg.v0));
+            if (speed > 0.0f) solver->set_velocity_limit(10.0f * speed);
+        }
         for (int i = 0; i < steps; ++i) {
             solver->step();
             // Look at the result regularly (as the viewer does every frame): invalid values are
             // then replaced by a recent valid value instead of an ancient one.
-            if ((i + 1) % 100 == 0) (void)solver->fields();
+            if ((i + 1) % 100 == 0) {
+                (void)solver->fields();
+                if (stabilize && stabilizer.update(solver->repaired_values(), solver->steps())) {
+                    solver->set_time_step(stabilizer.dt());
+                    solver->set_advection(stabilizer.advection());
+                }
+            }
         }
         solver->wait();
         const double secs = std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
@@ -104,6 +118,10 @@ int main(int argc, char** argv) {
         const tcc::Fields& f = solver->fields();
         std::printf("%d steps (t = %.3f s simulated) in %.3f s wall time\n", steps,
                     static_cast<double>(steps) * static_cast<double>(cfg.dt), secs);
+        if (stabilize && stabilizer.events() > 0)
+            std::printf("stabiliser: %llu events, time step now %g s (level %d), convection %s\n",
+                        static_cast<unsigned long long>(stabilizer.events()), static_cast<double>(stabilizer.dt()),
+                        stabilizer.level(), tcc::to_string(stabilizer.advection()));
         if (solver->repaired_values() > 0)
             std::printf("A NaN error was fixed (%llu values replaced by the last valid value): this simulation\n"
                         "has turbulence and might not match a real fluid.\n",

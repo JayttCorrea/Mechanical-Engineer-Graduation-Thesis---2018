@@ -29,6 +29,16 @@ public:
     // Change the number of Jacobi sweeps per step (values < 1 are clamped to 1).
     void set_pressure_iterations(int n);
 
+    // Change the time step or the convection scheme of a running simulation. Throws
+    // std::invalid_argument for a time step that is not positive and finite.
+    void set_time_step(float dt);
+    void set_advection(Advection scheme);
+
+    // Velocities above `limit` (in absolute value) are treated like NaN when the fields are
+    // read back: they are replaced by the last valid value. 0 or infinity disables the limit
+    // (the default: only NaN / infinity are repaired).
+    virtual void set_velocity_limit(float limit) = 0;
+
     virtual std::string backend_name() const = 0;
 
     // Zero velocity and pressure, step counter back to 0.

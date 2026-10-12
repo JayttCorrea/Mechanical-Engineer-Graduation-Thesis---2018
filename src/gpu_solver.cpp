@@ -220,9 +220,9 @@ GpuSolver::GpuSolver(const Config& cfg, const GpuOptions& options)
     s.program = Program(opencl().clCreateProgramWithSource(s.context.get(), 1, &source, &source_len, &err));
     check(err, "clCreateProgramWithSource");
 
+    // The convection scheme is a kernel argument (it can change while the simulation runs).
     const std::string options_str = std::string("-cl-std=CL1.2 -DCASE_TUBE=") +
-                                    (cfg_.type == CaseType::Tube ? "1" : "0") + " -DUPWIND=" +
-                                    (cfg_.advection == Advection::Upwind ? "1" : "0");
+                                    (cfg_.type == CaseType::Tube ? "1" : "0");
     err = opencl().clBuildProgram(s.program.get(), 1, &device, options_str.c_str(), nullptr, nullptr);
     if (err != CL_SUCCESS) {
         size_t log_size = 0;
@@ -297,8 +297,9 @@ void GpuSolver::step() {
 
     // 3) momentum update into the other velocity buffers
     cl_mem u_out = s.u[1 - s.u_cur].get(), v_out = s.v[1 - s.u_cur].get();
+    const int upwind = cfg_.advection == Advection::Upwind ? 1 : 0;
     Impl::set_args(s.k_velocity.get(), u_in, v_in, s.p[s.p_cur].get(), u_out, v_out,
-                   nx, ny, dx, dy, rho, nu, dt, u0, v0);
+                   nx, ny, dx, dy, rho, nu, dt, u0, v0, upwind);
     s.launch(s.k_velocity.get(), cfg_);
     s.u_cur = 1 - s.u_cur;
 
@@ -308,6 +309,11 @@ void GpuSolver::step() {
 
 void GpuSolver::wait() {
     check(opencl().clFinish(impl_->queue.get()), "clFinish");
+}
+
+void GpuSolver::set_velocity_limit(float limit) {
+    impl_->guard_u.set_limit(limit);
+    impl_->guard_v.set_limit(limit);
 }
 
 const Fields& GpuSolver::fields() {

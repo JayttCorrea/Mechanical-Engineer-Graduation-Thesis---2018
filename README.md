@@ -120,10 +120,23 @@ thesis kernels and the tests prove the new solver reproduces it step for step. E
   the same cell (0 if the cell never had one), and the corrected velocity is written back to the device so the
   run continues from valid numbers. The viewer then shows a banner above the simulation, "A NaN error was fixed:
   this simulation has turbulence and might not match a real fluid", with the number of replaced values; the
-  count is available as `Solver::repaired_values()`. It is a safety net, not a cure: if the setup is genuinely
-  unstable the same cells are repaired again every frame and the picture stops evolving, so restart with a
-  smaller speed or time step, or with upwind convection.
-* Tests: 72 unit tests + 12 GPU-vs-CPU / device tests (skipped automatically without a device).
+  count is available as `Solver::repaired_values()`. Velocities above 10x the inflow / lid speed also count as
+  invalid, because a diverging run produces huge finite numbers before the first NaN.
+* **Stabiliser (self-healing).** Patching cells alone cannot help when the cause of the instability is still
+  there: the field explodes again on the next frame and the picture freezes. So the viewer reacts to repairs by
+  removing the cause (`tcc::Stabilizer`, on by default, `--no-stabilize` turns it off):
+  1. the first time values had to be repaired, the thesis *backward* convection (unstable for any time step once
+     the flow reverses or is faster than the thesis tube) is replaced by *upwind*;
+  2. on further repairs the time step is halved, down to 1/1024 of the original (a time step above the CFL or
+     diffusion limit is the other cause);
+  3. after 20,000 quiet steps one level of the time step is given back.
+
+  What it changed is shown in the bar under the simulation ("upwind (stabiliser)", "dt ... (stabiliser)") and in the
+  panel's Convection row. On a tube at 0.05 m/s with the thesis scheme, 60,000 steps needed 27.7 million
+  replacements and froze without the stabiliser; with it, one event and a normal developing flow.
+  `fluid_snapshot --stabilize` does the same headless. Results are *not* accurate once the stabiliser has acted
+  (first-order upwind and a smaller step change the numerics); the banner says so.
+* Tests: 86 unit tests + 15 GPU-vs-CPU / device tests (skipped automatically without a device).
 
 ### Options that change the thesis behaviour (all default to the thesis behaviour unless noted)
 

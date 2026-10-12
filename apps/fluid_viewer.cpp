@@ -27,6 +27,7 @@
 #include "tcc/colormap.hpp"
 #include "tcc/setup.hpp"
 #include "tcc/solver_factory.hpp"
+#include "tcc/stabilizer.hpp"
 #include "tcc/state_io.hpp"
 
 namespace {
@@ -54,6 +55,9 @@ struct App {
     bool start_paused = false;
     bool warm_start = false;  // --warm-start has no panel row; it is kept from the command line
     bool repair_announced = false;  // the console message for repaired values was printed
+    bool auto_stabilize = true;     // --no-stabilize turns the self-healing off
+    float velocity_limit = 0.0f;    // values above this are invalid (0 = only NaN / infinity)
+    tcc::Stabilizer stabilizer{0.01f, tcc::Advection::Upwind};  // re-armed for every run
     bool running = false;
     Show show = Show::U;
     int vector_mode = 0;  // 0 off, 1 direction only, 2 proportional to speed
@@ -114,6 +118,15 @@ void reset_statistics() {
     app.repair_announced = false;
 }
 
+// Called whenever a solver starts or restarts. The solver treats absurdly large velocities
+// (10x the inflow or lid speed) like NaN, and the stabiliser stands ready to react to repairs.
+void arm_stabilizer(tcc::Solver& solver, const tcc::Config& cfg) {
+    app.stabilizer = tcc::Stabilizer(cfg.dt, cfg.advection);
+    const float scale = std::max(std::fabs(cfg.u0), std::fabs(cfg.v0));
+    app.velocity_limit = app.auto_stabilize && scale > 0.0f ? 10.0f * scale : 0.0f;
+    solver.set_velocity_limit(app.velocity_limit);
+}
+
 // Keep the panel and the "applied" copy in step with changes made during the simulation
 // (keys q / d / c), so they are not mistaken for pending edits.
 void sync_sweeps(int sweeps) {
@@ -128,6 +141,9 @@ bool switch_backend(tcc::Backend backend) {
         const tcc::Fields& f = app.solver->fields();
         fresh->set_velocity(f.u, f.v);
         fresh->set_pressure_iterations(app.solver->config().pressure_iterations);
+        fresh->set_velocity_limit(app.velocity_limit);
+        fresh->set_time_step(app.stabilizer.dt());  // keep what the stabiliser has settled on
+        fresh->set_advection(app.stabilizer.advection());
         app.solver = std::move(fresh);
         app.backend = backend;
         app.panel.setup().backend = backend;
@@ -172,6 +188,7 @@ std::string start_simulation(tcc::Config cfg, tcc::Backend wanted) {
     app.cfg = cfg;
     app.solver = std::move(solver);
     app.backend = used;
+    arm_stabilizer(*app.solver, cfg);
     reset_statistics();
     app.running = !(first && app.start_paused);
     allocate_texture();
@@ -416,13 +433,36 @@ void draw_bar(int win_w) {
         x += width + 6.0f;
     }
 
-    char stats[160];
+    char stats[256];
     const double ms = app.timed_steps ? app.total_ms / static_cast<double>(app.timed_steps) : 0.0;
-    std::snprintf(stats, sizeof stats, "step %llu   %.3f ms/step   %s [%.4g, %.4g]",
-                  static_cast<unsigned long long>(app.solver->steps()), ms, show_name(app.show),
-                  static_cast<double>(app.range.min), static_cast<double>(app.range.max));
+    int len = std::snprintf(stats, sizeof stats, "step %llu   %.3f ms/step   %s [%.4g, %.4g]",
+                            static_cast<unsigned long long>(app.solver->steps()), ms, show_name(app.show),
+                            static_cast<double>(app.range.min), static_cast<double>(app.range.max));
+    // what the stabiliser changed on its own
+    if (app.stabilizer.level() > 0 && len > 0 && len < static_cast<int>(sizeof stats))
+        len += std::snprintf(stats + len, sizeof stats - static_cast<std::size_t>(len), "   dt %.3g s (stabiliser)",
+                             static_cast<double>(app.stabilizer.dt()));
+    if (app.stabilizer.advection_was_changed() && len > 0 && len < static_cast<int>(sizeof stats))
+        std::snprintf(stats + len, sizeof stats - static_cast<std::size_t>(len), "   upwind (stabiliser)");
     if (x + text_width(font_small(), stats) + 12.0f < static_cast<float>(win_w))
         text(font_small(), x + 10.0f, 13.0f, stats, kGrey);
+}
+
+// Reacts to repaired values: removes the cause of the instability so the run can go on.
+void apply_stabilizer() {
+    if (!app.solver || !app.auto_stabilize) return;
+    const tcc::Advection before = app.solver->config().advection;
+    if (!app.stabilizer.update(app.solver->repaired_values(), app.solver->steps())) return;
+    app.solver->set_time_step(app.stabilizer.dt());
+    app.solver->set_advection(app.stabilizer.advection());
+    if (app.stabilizer.advection() != before) {
+        // show what is really running
+        app.panel.setup().advection = app.stabilizer.advection();
+        app.applied.advection = app.stabilizer.advection();
+        std::printf("stabiliser: convection switched to upwind (the thesis scheme is unstable here)\n");
+    } else {
+        std::printf("stabiliser: time step now %g s\n", static_cast<double>(app.stabilizer.dt()));
+    }
 }
 
 void display() {
@@ -433,6 +473,7 @@ void display() {
     }
     gl_draw::begin_pixels(w, h, kBackground);
     draw_simulation_area(w, h);
+    apply_stabilizer();  // the fields were just read (and repaired) by draw_simulation_area
     draw_banner(w, h);
     draw_bar(w);
     app.panel.draw(h, panel_state());
@@ -479,6 +520,8 @@ void cycle_vectors() { app.vector_mode = (app.vector_mode + 1) % 3; }
 
 void reset_simulation() {
     if (!app.solver) return;
+    // The stabiliser keeps what it learned (upwind, smaller time step): a fresh start from rest
+    // would only run into the same instability again.
     app.solver->reset();
     reset_statistics();
 }
@@ -627,6 +670,7 @@ void usage() {
         "  --paused               start the first simulation paused (press s to run)\n"
         "  --pause-at N           pause automatically after N steps (thesis used 1000)\n"
         "  --max-frames N         exit after N steps (for automated checks)\n"
+        "  --no-stabilize         do not react to NaN repairs (no automatic upwind / smaller time step)\n"
         "%s",
         cli::config_help());
 }
@@ -644,7 +688,7 @@ int main(int argc, char** argv) {
     if (args.has("help")) { usage(); return 0; }
     std::vector<std::string> known = cli::config_options();
     for (const char* k : {"backend", "width", "height", "state", "start", "paused", "pause-at", "max-frames",
-                          "no-menu", "autostart", "help"})
+                          "no-menu", "autostart", "no-stabilize", "help"})
         known.emplace_back(k);
     args.allow_only(known);
 
@@ -656,6 +700,7 @@ int main(int argc, char** argv) {
 
         app.state_path = args.str("state", app.state_path);
         app.start_paused = args.has("paused");
+        app.auto_stabilize = !args.has("no-stabilize");
         app.warm_start = cfg.warm_start_pressure;
         app.pause_at = args.integer("pause-at", -1);
         app.max_frames = args.integer("max-frames", -1);

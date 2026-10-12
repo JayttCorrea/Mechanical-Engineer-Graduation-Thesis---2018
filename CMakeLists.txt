@@ -49,7 +49,8 @@ add_library(tcc_fluid STATIC
     src/state_io.cpp
     src/png_writer.cpp
     src/solver_factory.cpp
-    src/setup.cpp)
+    src/setup.cpp
+    src/stabilizer.cpp)
 target_include_directories(tcc_fluid PUBLIC include)
 
 if(TCC_OPENMP)

@@ -39,6 +39,7 @@ public:
     void wait() override;
     const Fields& fields() override;
     void set_velocity(const std::vector<float>& u, const std::vector<float>& v) override;
+    void set_velocity_limit(float limit) override;
 
 private:
     struct Impl;

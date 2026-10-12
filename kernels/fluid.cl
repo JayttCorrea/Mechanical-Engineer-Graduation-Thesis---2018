@@ -6,15 +6,12 @@
 // Layout : row-major, i = y * nx + x, y = 0 is the bottom row.
 // Options: -DCASE_TUBE=1  inlet on the left (u0,v0), outflow on the right, no-slip walls
 //          -DCASE_TUBE=0  lid-driven cavity: (u0,v0) is the lid velocity on the top row
-//          -DUPWIND=0     thesis advection: backward difference whatever the sign of the velocity
-//          -DUPWIND=1     first-order upwind (needed when the flow reverses, e.g. the cavity)
+// The convection scheme is a run-time argument of velocity_update (`upwind`): 0 = thesis
+// backward difference whatever the sign of the velocity, 1 = first-order upwind (needed when the
+// flow reverses, e.g. in the cavity). It can therefore change while a simulation is running.
 
 #ifndef CASE_TUBE
 #define CASE_TUBE 1
-#endif
-
-#ifndef UPWIND
-#define UPWIND 0
 #endif
 
 typedef struct { float uN, vN, uS, vS, uE, vE, uW, vW; } VelNb;
@@ -122,7 +119,8 @@ __kernel void velocity_update(__global const float* restrict U,
                               const int nx, const int ny,
                               const float dx, const float dy,
                               const float rho, const float nu, const float dt,
-                              const float u0, const float v0)
+                              const float u0, const float v0,
+                              const int upwind)
 {
     const int x = get_global_id(0), y = get_global_id(1);
     const int i = y * nx + x;
@@ -131,18 +129,16 @@ __kernel void velocity_update(__global const float* restrict U,
 
     const float u = U[i], v = V[i];
 
-#if UPWIND
-    // difference taken on the side the flow comes from
-    const float Au = u * dt / dx * (u > 0.0f ? (u - n.uW) : (n.uE - u));
-    const float Av = u * dt / dx * (u > 0.0f ? (v - n.vW) : (n.vE - v));
-    const float Bu = v * dt / dy * (v > 0.0f ? (u - n.uS) : (n.uN - u));
-    const float Bv = v * dt / dy * (v > 0.0f ? (v - n.vS) : (n.vN - v));
-#else
-    const float Au = u * dt / dx * (u - n.uW);
-    const float Av = u * dt / dx * (v - n.vW);
-    const float Bu = v * dt / dy * (u - n.uS);
-    const float Bv = v * dt / dy * (v - n.vS);
-#endif
+    // Convection. Backward (thesis): always the difference towards the west / south neighbour.
+    // Upwind: the difference is taken on the side the flow comes from.
+    const float du_x = upwind ? (u > 0.0f ? (u - n.uW) : (n.uE - u)) : (u - n.uW);
+    const float dv_x = upwind ? (u > 0.0f ? (v - n.vW) : (n.vE - v)) : (v - n.vW);
+    const float du_y = upwind ? (v > 0.0f ? (u - n.uS) : (n.uN - u)) : (u - n.uS);
+    const float dv_y = upwind ? (v > 0.0f ? (v - n.vS) : (n.vN - v)) : (v - n.vS);
+    const float Au = u * dt / dx * du_x;
+    const float Av = u * dt / dx * dv_x;
+    const float Bu = v * dt / dy * du_y;
+    const float Bv = v * dt / dy * dv_y;
     const float Cu = (dt / (2.0f * rho * dx)) * (p.E - p.W);
     const float Cv = (dt / (2.0f * rho * dy)) * (p.N - p.S);
     const float Du = (dt / (dx * dx)) * (n.uE - 2.0f * u + n.uW);
