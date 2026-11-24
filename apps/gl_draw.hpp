@@ -2,7 +2,7 @@
 // Tiny immediate-mode drawing helpers (rectangles and bitmap text) in window pixels,
 // origin at the bottom-left like OpenGL itself.
 
-#include <GL/freeglut.h>
+#include "glut_compat.hpp"
 
 #include <string>
 

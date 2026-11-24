@@ -13,6 +13,86 @@ Two systems are simulated, as in the thesis:
 
 Water-like fluid: ρ = 999 kg/m³, ν = 1e-6 m²/s, Δt = 0.01 s.
 
+## Automatic Windows / macOS build
+
+From a terminal in the repository, use the same command on either system:
+
+```sh
+cmake -P build.cmake
+```
+
+The script detects the host, configures a Release build, compiles, runs enabled tests
+and installs to `dist/mac` or `dist/windows`. It prefers Ninja if available, otherwise
+uses CMake's default generator; existing build directories keep their generator.
+On macOS it also ad-hoc signs and verifies the application bundle.
+
+The CMake macro `tcc_detect_platform()` detects the **target** system and defines
+`TCC_PLATFORM_MACOS` or `TCC_PLATFORM_WINDOWS` for C++ sources. macOS selects Metal,
+shared GPU buffers and system GLUT, with supported link-time optimization enabled
+in Release. Windows selects OpenCL/freeglut and retains static MinGW runtime linking.
+No `-ffast-math` or machine-specific CPU instruction flags are used.
+
+Prerequisites: CMake 3.21+ and a C++17 toolchain. On Mac, install Apple's Command Line
+Tools. On Windows, use the MSYS2 UCRT64 environment and packages listed under Building
+below (CMake, Ninja, GCC, OpenCL headers, freeglut). Missing OpenCL headers produces a
+CPU-only build; missing freeglut skips the viewer, as reported during configuration.
+Windows execution must be verified on a Windows machine.
+
+Optional overrides (pass them **before** `-P`):
+
+```sh
+cmake -DTCC_BUILD_GPU=OFF -P build.cmake
+cmake -DTCC_MACOS_IPO=OFF -P build.cmake
+cmake -DTCC_INSTALL_DIR=/absolute/output/path -P build.cmake
+```
+
+Direct `cmake -S . -B build` usage also detects the target automatically. For
+cross-compilation use direct CMake with the appropriate toolchain file; `build.cmake`
+is intended for native builds and executes the generated tests on the host.
+
+## macOS / Apple Silicon (Metal)
+
+On Apple Silicon, CMake builds a native arm64 application and selects the Metal compute
+backend for GPU mode. The existing window uses Apple's built-in OpenGL/GLUT frameworks;
+the fluid calculation runs on Metal. This is still a **2D** simulation.
+No Homebrew graphics packages, OpenCL driver, or full Xcode installation are required
+at runtime. CPU mode remains available. The Metal backend requires unified memory;
+Intel/discrete-GPU Macs have not been validated (use `-DTCC_BUILD_GPU=OFF` for CPU).
+
+Build with Apple's Command Line Tools and CMake:
+
+```sh
+./scripts/build-macos.sh "$PWD/dist/mac"
+open dist/mac/fluid_viewer.app
+```
+
+Double-click `fluid_viewer.app`, select **GPU (Metal)** and press **START** or Enter.
+Use Up/Down and Left/Right or click the setting arrows; the mouse wheel callback is
+available only in the freeglut version. CLI utilities are `fluid_bench` and `fluid_snapshot`
+(without `.exe`). Run CLI utilities from a writable directory for output files.
+The bundle is locally ad-hoc signed; it is not Developer ID signed or notarized for distribution.
+
+Metal uses persistent shared-memory buffers, ping-pong pressure/velocity fields and a
+single compute encoder per step with barriers between dependent dispatches. Shader
+source is embedded and compiled at runtime, with fast math disabled. No field readback
+is performed until `fields()` is requested. Tests reuse the same GPU/CPU equivalence,
+reset, changing-parameters and instability tests as OpenCL.
+
+Validated locally on Apple M2: **86 unit tests + 15 Metal tests passed**, with no skips.
+Cavity benchmark, 100 pressure sweeps, 100 timed steps after 10 warm-up steps,
+no per-step readback (illustrative measurements on this Mac):
+
+| Mesh | Serial CPU ms/step | Metal ms/step | Speedup |
+|---|---:|---:|---:|
+| 100 × 100 | 1.007 | 0.665 | 1.5× |
+| 200 × 200 | 4.002 | 0.549 | 7.3× |
+
+```sh
+./dist/mac/fluid_bench --case cavity --mesh 100,200 --ipf 100 --frames 100 --warmup 10 --csv bench_mac.csv
+```
+
+The Windows instructions below describe the original distribution.
+
 ## Quick start (double-click)
 
 Open the `dist` folder and double-click **`fluid_viewer.exe`**. No installation is needed: each `.exe`

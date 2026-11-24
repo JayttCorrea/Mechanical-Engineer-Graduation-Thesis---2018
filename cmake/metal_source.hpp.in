@@ -1,0 +1,2 @@
+#pragma once
+static const char* metal_source = R"METAL(@TCC_METAL_SOURCE@)METAL";
