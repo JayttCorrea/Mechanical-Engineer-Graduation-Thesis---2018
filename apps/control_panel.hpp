@@ -295,7 +295,7 @@ private:
         using tcc::Field;
         switch (f) {
             case Field::System: return "Tube: fluid enters on the left and leaves on the right. Cavity: a lid slides over a closed box.";
-            case Field::Backend: return "GPU uses the graphics card (OpenCL), CPU runs serially. Same results, very different speed.";
+            case Field::Backend: return "GPU uses the graphics card (Metal on Mac, OpenCL elsewhere), CPU runs serially. Same results, very different speed.";
             case Field::Fluid: return "Density and viscosity of the fluid.";
             case Field::Velocity: return "Speed of the inflow (tube) or of the moving lid (cavity). Click the value to type one.";
             case Field::Width: return "Size along x of the simulated region. Click the value to type one.";

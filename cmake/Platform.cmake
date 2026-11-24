@@ -1,0 +1,25 @@
+# Detect the target (rather than the host) so cross-compilation stays correct.
+macro(tcc_detect_platform)
+    set(TCC_MACOS OFF)
+    set(TCC_WINDOWS OFF)
+    if(CMAKE_SYSTEM_NAME STREQUAL "Darwin")
+        set(TCC_MACOS ON)
+        add_compile_definitions(TCC_PLATFORM_MACOS=1)
+        message(STATUS "TCC target: macOS (${CMAKE_SYSTEM_PROCESSOR}); GPU: Metal")
+    elseif(WIN32)
+        set(TCC_WINDOWS ON)
+        add_compile_definitions(TCC_PLATFORM_WINDOWS=1)
+        message(STATUS "TCC target: Windows; GPU: OpenCL")
+    else()
+        message(STATUS "TCC target: ${CMAKE_SYSTEM_NAME}; GPU: OpenCL")
+    endif()
+endmacro()
+
+# Release already enables compiler optimizations. Also allow cross-file optimization
+# on Mac when supported, without changing floating-point accuracy or requiring libomp.
+function(tcc_optimize_macos target)
+    if(TCC_MACOS AND TCC_MACOS_IPO_SUPPORTED)
+        set_property(TARGET ${target} PROPERTY INTERPROCEDURAL_OPTIMIZATION_RELEASE TRUE)
+        set_property(TARGET ${target} PROPERTY INTERPROCEDURAL_OPTIMIZATION_RELWITHDEBINFO TRUE)
+    endif()
+endfunction()

@@ -24,3 +24,11 @@ if(TCC_HAVE_OPENCL)
     # exit code 77 = no OpenCL device on this machine -> reported as skipped
     set_tests_properties(gpu PROPERTIES SKIP_RETURN_CODE 77)
 endif()
+
+if(TCC_HAVE_METAL)
+    add_executable(tcc_metal_tests test_main.cpp test_gpu_solver.cpp)
+    target_link_libraries(tcc_metal_tests PRIVATE tcc_fluid)
+    target_include_directories(tcc_metal_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+    add_test(NAME metal COMMAND tcc_metal_tests)
+    set_tests_properties(metal PROPERTIES SKIP_RETURN_CODE 77)
+endif()

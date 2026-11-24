@@ -5,7 +5,16 @@
 #include <limits>
 
 #include "tcc/cpu_solver.hpp"
+#ifdef TCC_WITH_METAL
+#include "tcc/metal_solver.hpp"
+namespace tcc {
+using GpuSolver = MetalSolver;
+using GpuOptions = MetalOptions;
+inline auto list_opencl_devices() { return list_metal_devices(); }
+}
+#else
 #include "tcc/gpu_solver.hpp"
+#endif
 #include "tcc/stabilizer.hpp"
 #include "test_framework.hpp"
 

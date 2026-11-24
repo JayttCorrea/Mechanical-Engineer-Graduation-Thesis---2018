@@ -284,7 +284,13 @@ std::string Setup::value_text(Field field) const {
         case Field::System:
             return type == CaseType::Tube ? "Tube (channel flow)" : "Cavity (lid-driven)";
         case Field::Backend:
-            if (backend == Backend::Gpu) return "GPU (OpenCL)";
+            if (backend == Backend::Gpu) {
+#ifdef TCC_WITH_METAL
+                return "GPU (Metal)";
+#else
+                return "GPU (OpenCL)";
+#endif
+            }
             return gpu_available ? "CPU (serial)" : "CPU (no GPU found)";
         case Field::Fluid: {
             if (fluid == Fluid::Custom) return "Custom (" + number(custom_rho) + " kg/m3)";

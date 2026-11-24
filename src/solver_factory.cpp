@@ -3,7 +3,9 @@
 #include <stdexcept>
 
 #include "tcc/cpu_solver.hpp"
-#ifdef TCC_WITH_OPENCL
+#if defined(TCC_WITH_METAL)
+#include "tcc/metal_solver.hpp"
+#elif defined(TCC_WITH_OPENCL)
 #include "tcc/gpu_solver.hpp"
 #endif
 
@@ -20,7 +22,9 @@ bool parse_backend(const std::string& text, Backend& out) {
 }
 
 bool gpu_available() {
-#ifdef TCC_WITH_OPENCL
+#ifdef TCC_WITH_METAL
+    return !list_metal_devices().empty();
+#elif defined(TCC_WITH_OPENCL)
     return !list_opencl_devices().empty();
 #else
     return false;
@@ -29,7 +33,9 @@ bool gpu_available() {
 
 std::unique_ptr<Solver> make_solver(Backend backend, const Config& cfg) {
     if (backend == Backend::Cpu) return std::make_unique<CpuSolver>(cfg);
-#ifdef TCC_WITH_OPENCL
+#ifdef TCC_WITH_METAL
+    return std::make_unique<MetalSolver>(cfg);
+#elif defined(TCC_WITH_OPENCL)
     return std::make_unique<GpuSolver>(cfg);
 #else
     throw std::runtime_error("this build has no OpenCL support (rebuild with TCC_BUILD_GPU=ON)");

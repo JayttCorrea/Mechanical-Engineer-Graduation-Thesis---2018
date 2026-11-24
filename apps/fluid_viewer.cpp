@@ -7,7 +7,7 @@
 //
 // The whole field is drawn as one textured quad instead of one GL_QUAD per cell.
 
-#include <GL/freeglut.h>
+#include "glut_compat.hpp"
 
 #include <algorithm>
 #include <chrono>
@@ -645,7 +645,7 @@ void mouse(int button, int state, int x, int y) {
     glutPostRedisplay();
 }
 
-void mouse_wheel(int, int direction, int x, int y) {
+[[maybe_unused]] void mouse_wheel(int, int direction, int x, int y) {
     if (x < ControlPanel::kWidth) {
         ControlPanel::Action action;
         app.panel.wheel(direction, x, y, (glutGetModifiers() & GLUT_ACTIVE_SHIFT) != 0, action);
@@ -740,7 +740,9 @@ int main(int argc, char** argv) {
         glutKeyboardFunc(keyboard);
         glutSpecialFunc(special);
         glutMouseFunc(mouse);
+#ifndef __APPLE__
         glutMouseWheelFunc(mouse_wheel);
+#endif
         glutPassiveMotionFunc(passive_motion);
         glutReshapeFunc(reshape);
 
